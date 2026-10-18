@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 BOT_TOKEN = '8530974763:AAFNe--rkf-ocpitUqSV2z4tTWdoln_GgII'
 CHAT_ID = '8894056949'
 
-# بيانات الجيميل الخاصة بك (مدمجة وجاهزة)
+# بيانات الجيميل الخاصة بك
 SENDER_EMAIL = 'oraby9797@gmail.com'       
 SENDER_PASSWORD = 'txdseoecaarvkgmc'     
 RECEIVER_EMAIL = 'oraby9797@gmail.com'     
@@ -37,8 +37,8 @@ def send_email_msg(subject, body):
         msg['Subject'] = f"🚨 [تحديث جديد LMS] {subject}"
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # استخدام المنفذ المشفر 465 المباشر لتفادي حظر سيرفرات GitHub
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
@@ -139,8 +139,8 @@ def run_monitor():
 if __name__ == '__main__':
     try:
         # رسالة تجريبية للتأكد من وصول إشعار الجيميل والتليجرام
-        send_telegram_msg("✅ تم ربط التليجرام والجيميل بنجاح! السيستم يتابع LMS جامعة الدلتا الآن.")
-        send_email_msg("ربط الخدمة بنجاح", "أهلاً يا بشمهندس عرابي، تم تفعيل ربط الجيميل بنجاح مع أوتوميشن LMS جامعة الدلتا!")
+        send_telegram_msg("✅ تم تحديث منفذ الجيميل وتجربة الاتصال بنجاح!")
+        send_email_msg("تأكيد تفعيل الجيميل", "أهلاً يا بشمهندس عرابي، تم تفعيل منفذ الجيميل المباشر بنجاح مع أوتوميشن LMS جامعة الدلتا!")
         run_monitor()
     except Exception as e:
         print(f"حدث خطأ أثناء الفحص: {e}")

@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ==========================================
-# 1. إعدادات بوت التليجرام الخاص بك
+# 1. إعدادات بوت التليجرام
 # ==========================================
 BOT_TOKEN = '8530974763:AAFNe--rkf-ocpitUqSV2z4tTWdoln_GgII'
 CHAT_ID = '8894056949'
@@ -13,7 +13,7 @@ def send_telegram_msg(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         'chat_id': CHAT_ID,
-        'text': f"🚨 [تحديث جديد من LMS جامعة الدلتا]\n\n{text}"
+        'text': f"🚨 [تحديث LMS جامعة الدلتا]\n\n{text}"
     }
     try:
         requests.post(url, data=payload)
@@ -33,10 +33,12 @@ LOGIN_URL = 'https://dulms.deltauniv.edu.eg/login.aspx'
 USERNAME = '4241427'            # كود الطالب
 PASSWORD = '30509071200293'     # كلمة المرور
 
+# روابط الأقسام الشاملة (غياب، واجبات، إشعارات، وملفات المواد)
 PAGES_TO_MONITOR = {
-    'الكويزات والواجبات': 'https://dulms.deltauniv.edu.eg/StudentQuiz.aspx',
-    'الغياب والحضور': 'https://dulms.deltauniv.edu.eg/StudentAttendance.aspx',
-    'الإشعارات العامة': 'https://dulms.deltauniv.edu.eg/StudentDashboard.aspx'
+    'الغياب والحضور (Lecture & Section Absence)': 'https://dulms.deltauniv.edu.eg/StudentAttendance.aspx',
+    'الواجبات والكويزات (Assignments & Quizzes)': 'https://dulms.deltauniv.edu.eg/StudentQuiz.aspx',
+    'الإشعارات واللوحة الرئيسية (Dashboard)': 'https://dulms.deltauniv.edu.eg/StudentDashboard.aspx',
+    'المواد وملفات المحاضرات (Files & Materials)': 'https://dulms.deltauniv.edu.eg/StudentCourses.aspx'
 }
 
 def login():
@@ -63,11 +65,12 @@ def fetch_page_items(url):
     soup = BeautifulSoup(response.text, 'html.parser')
     extracted_texts = []
     
+    # فحص الجداول والعناصر والروابط والملفات داخل الصفحة
     container = soup.find('div', class_='page-contect') or soup.find('section', id='user-control') or soup.find('form')
     if container:
-        for item in container.find_all(['div', 'tr', 'li']):
+        for item in container.find_all(['div', 'tr', 'li', 'a', 'td']):
             text = item.text.strip()
-            if text and len(text) > 5 and text not in extracted_texts:
+            if text and len(text) > 4 and text not in extracted_texts:
                 extracted_texts.append(text)
                 
     return extracted_texts
@@ -101,17 +104,18 @@ def run_monitor():
         curr_items = set(items)
         new_items = curr_items - prev_items
         
-        if new_items:
+        # إرسال تنبيه فقط في حالة وجود عنصر جديد أو غياب أو ملف مرفوع جديد
+        if new_items and previous_state:
             for new_item in new_items:
-                msg = f"📌 القسم: {category_name}\n\n📝 التحديث: {new_item}"
+                msg = f"📌 القسم: {category_name}\n\n📝 العنصر / الملف الجديد:\n{new_item}"
                 send_telegram_msg(msg)
 
     save_state(current_state)
 
 if __name__ == '__main__':
     try:
-        # رسالة تجريبية فورية للتأكد من وصول التنبيهات
-        send_telegram_msg("شغال تمام يا بشمهندس عرابي! السيستم متصل حالياً بـ LMS جامعة الدلتا وبيفحص الموقع بنجاح.")
+        # رسالة تأكيد فورية بتعديل الكود وتشغيله بنجاح
+        send_telegram_msg("✅ تم تحديث كود السكربت ونظام الفحص (شامل الغياب، الواجبات، والملفات) يعمل بنجاح الآن!")
         run_monitor()
     except Exception as e:
         print(f"حدث خطأ أثناء الفحص: {e}")

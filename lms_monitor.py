@@ -110,6 +110,8 @@ def run_monitor():
 
 if __name__ == '__main__':
     try:
+        # رسالة تجريبية فورية للتأكد من وصول التنبيهات
+        send_telegram_msg("شغال تمام يا بشمهندس عرابي! السيستم متصل حالياً بـ LMS جامعة الدلتا وبيفحص الموقع بنجاح.")
         run_monitor()
     except Exception as e:
         print(f"حدث خطأ أثناء الفحص: {e}")

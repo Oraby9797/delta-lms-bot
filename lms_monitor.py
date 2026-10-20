@@ -3,6 +3,7 @@ import os
 import re
 import requests
 import smtplib
+from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formatdate, make_msgid
@@ -23,7 +24,7 @@ def send_telegram_msg(text):
     payload = {
         'chat_id': CHAT_ID,
         'text': text,
-        'parse_mode': 'Markdown'
+        'parse_mode': 'HTML'
     }
     try:
         requests.post(url, data=payload)
@@ -111,7 +112,6 @@ def fetch_page_items(url):
     soup = BeautifulSoup(response.text, 'html.parser')
     extracted_items = []
     
-    # فحص كافة الجداول والتفاصيل
     tables = soup.find_all('table')
     for table in tables:
         rows = table.find_all('tr')
@@ -122,7 +122,6 @@ def fetch_page_items(url):
                 if len(row_str) > 5 and row_str not in extracted_items:
                     extracted_items.append(row_str)
 
-    # فحص البطاقات والقوائم
     cards = soup.find_all(['div', 'li', 'article', 'tr'], class_=re.compile(r'(card|item|quiz|assignment|absent|grade|notice|notification)', re.I))
     for card in cards:
         txt = card.text.strip()
@@ -133,7 +132,7 @@ def fetch_page_items(url):
     return extracted_items
 
 # ==========================================
-# 3. الفحص وإرسال الرسائل المنفصلة
+# 3. الفحص والتقرير اليومي والتنفيذ المباشر
 # ==========================================
 STATE_FILE = 'lms_state.json'
 
@@ -148,12 +147,16 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=4)
 
 def run_monitor():
-    print("🔍 جاري فحص LMS جامعة الدلتا واستخراج البيانات المنظمة...")
+    print("🔍 جاري فحص LMS جامعة الدلتا وإعداد التقرير...")
     login()
     previous_state = load_state()
     current_state = {}
     
-    is_first_run = len(previous_state) == 0
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    last_report_date = previous_state.get('_last_report_date', '')
+    
+    # يرسل تقريراً شاملاً فورياً في المرة الأولى، أو مرة واحدة يومياً أوتوماتيكياً
+    should_send_daily_report = (last_report_date != today_str) or (len(previous_state) == 0)
 
     for category_name, page_url in PAGES_TO_MONITOR.items():
         items = fetch_page_items(page_url)
@@ -164,24 +167,26 @@ def run_monitor():
         
         new_items = curr_items - prev_items
         
-        if is_first_run:
-            # إرسال رسالة مستقلة ومنظمة لكل قسم
+        # 1. حالة التقرير الشامل (أول تشغيل أو تقرير يومي)
+        if should_send_daily_report:
             if items:
                 formatted_list = "\n".join([f"• {item}" for item in items[:6]])
-                msg = f"<b>{category_name}</b>\n\n{formatted_list}"
+                msg = f"<b>[التقرير اليومي - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\n{formatted_list}"
             else:
-                msg = f"<b>{category_name}</b>\n\nلا توجد عناصر مسجلة حالياً."
+                msg = f"<b>[التقرير اليومي - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\nلا توجد عناصر مسجلة حالياً."
             
             send_telegram_msg(msg)
             send_email_msg(category_name, msg)
-        else:
-            # التنبيهات الجديدة المنفصلة
-            if new_items:
-                for new_item in new_items:
-                    msg = f"🚨 <b>[تحديث جديد]</b>\n\n<b>القسم:</b> {category_name}\n\n<b>التفاصيل:</b>\n{new_item}"
-                    send_telegram_msg(msg)
-                    send_email_msg(category_name, msg)
+            
+        # 2. حالة وجود تحديثات جديدة بين التقارير اليومية
+        elif new_items:
+            for new_item in new_items:
+                msg = f"🚨 <b>[تحديث جديد عاجل]</b>\n\n<b>القسم:</b> {category_name}\n\n<b>التفاصيل:</b>\n{new_item}"
+                send_telegram_msg(msg)
+                send_email_msg(category_name, msg)
 
+    # حفظ تاريخ اليوم لمنع تكرار التقرير اليومي في الفحص التالي لنفس اليوم
+    current_state['_last_report_date'] = today_str
     save_state(current_state)
 
 if __name__ == '__main__':

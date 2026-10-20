@@ -9,7 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.utils import formatdate, make_msgid
 from playwright.sync_api import sync_playwright
 
-# ==========================================
+# =========================================
 # 1. إعدادات التليجرام والجيميل
 # ==========================================
 BOT_TOKEN = '8530974763:AAFNe--rkf-ocpitUqSV2z4tTWdoln_GgII'

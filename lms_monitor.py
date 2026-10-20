@@ -7,7 +7,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formatdate, make_msgid
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 # ==========================================
 # 1. إعدادات التليجرام والجيميل
@@ -68,14 +68,8 @@ def send_email_msg(subject, body):
         print(f"خطأ إرسال الإيميل: {e}")
 
 # ==========================================
-# 2. بيانات الدخول لجامعة الدلتا والأقسام
+# 2. الفحص التفاعلي باستخدام Playwright
 # ==========================================
-session = requests.Session()
-session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-})
-
-LOGIN_URL = 'https://dulms.deltauniv.edu.eg/login.aspx'
 USERNAME = '4241427'            # كود الطالب
 PASSWORD = '30509071200293'     # كلمة المرور
 
@@ -88,51 +82,57 @@ PAGES_TO_MONITOR = {
     '🔔 الإشعارات العامة واللوحة (Dashboard)': 'https://dulms.deltauniv.edu.eg/StudentDashboard.aspx'
 }
 
-def login():
-    res = session.get(LOGIN_URL)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    
-    viewstate = soup.find('input', id='__VIEWSTATE')
-    viewstate_val = viewstate['value'] if viewstate else ''
-    
-    eventvalidation = soup.find('input', id='__EVENTVALIDATION')
-    eventvalidation_val = eventvalidation['value'] if eventvalidation else ''
+def scrape_lms_with_browser():
+    scraped_data = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
 
-    login_payload = {
-        '__VIEWSTATE': viewstate_val,
-        '__EVENTVALIDATION': eventvalidation_val,
-        'txtUsername': USERNAME,
-        'txtPassword': PASSWORD,
-        'btnLogin': 'Login'
-    }
-    session.post(LOGIN_URL, data=login_payload)
+        # 1. تسجيل الدخول التفاعلي
+        print("🔑 جاري تسجيل الدخول تفاعلياً لـ LMS جامعة الدلتا...")
+        page.goto("https://dulms.deltauniv.edu.eg/login.aspx", wait_until="networkidle")
+        
+        page.fill("input[name='txtUsername']", USERNAME)
+        page.fill("input[name='txtPassword']", PASSWORD)
+        page.click("input[name='btnLogin']")
+        
+        page.wait_for_load_state("networkidle")
 
-def fetch_page_items(url):
-    response = session.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    extracted_items = []
-    
-    tables = soup.find_all('table')
-    for table in tables:
-        rows = table.find_all('tr')
-        for row in rows:
-            cols = [col.text.strip() for col in row.find_all(['td', 'th']) if col.text.strip()]
-            if cols:
-                row_str = " | ".join(cols)
-                if len(row_str) > 5 and row_str not in extracted_items:
-                    extracted_items.append(row_str)
+        # 2. التنقل داخل الأقسام وسحب البيانات التفصيلية
+        for category_name, url in PAGES_TO_MONITOR.items():
+            print(f"🌐 فحص قسم: {category_name}")
+            try:
+                page.goto(url, wait_until="networkidle")
+                page.wait_for_timeout(2000)
 
-    cards = soup.find_all(['div', 'li', 'article', 'tr'], class_=re.compile(r'(card|item|quiz|assignment|absent|grade|notice|notification)', re.I))
-    for card in cards:
-        txt = card.text.strip()
-        txt = re.sub(r'\s+', ' ', txt)
-        if txt and len(txt) > 8 and txt not in extracted_items:
-            extracted_items.append(txt)
+                extracted_items = []
+                
+                rows = page.query_selector_all("table tr")
+                for row in rows:
+                    text = row.inner_text().strip()
+                    text = re.sub(r'\t+', ' | ', text)
+                    text = re.sub(r'\n+', ' | ', text)
+                    if len(text) > 8 and text not in extracted_items:
+                        extracted_items.append(text)
 
-    return extracted_items
+                cards = page.query_selector_all("div.card, div.item, .quiz-item, .assignment-item, .notification-item")
+                for card in cards:
+                    text = card.inner_text().strip()
+                    text = re.sub(r'\s+', ' ', text)
+                    if len(text) > 8 and text not in extracted_items:
+                        extracted_items.append(text)
+
+                scraped_data[category_name] = extracted_items
+            except Exception as e:
+                print(f"خطأ في فحص {category_name}: {e}")
+                scraped_data[category_name] = []
+
+        browser.close()
+    return scraped_data
 
 # ==========================================
-# 3. الفحص والتقرير اليومي والتنفيذ المباشر
+# 3. المقارنة وإرسال التقارير المنظمة
 # ==========================================
 STATE_FILE = 'lms_state.json'
 
@@ -147,45 +147,38 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=4)
 
 def run_monitor():
-    print("🔍 جاري فحص LMS جامعة الدلتا وإعداد التقرير...")
-    login()
     previous_state = load_state()
-    current_state = {}
+    scraped_data = scrape_lms_with_browser()
     
     today_str = datetime.now().strftime('%Y-%m-%d')
     last_report_date = previous_state.get('_last_report_date', '')
-    
-    # يرسل تقريراً شاملاً فورياً في المرة الأولى، أو مرة واحدة يومياً أوتوماتيكياً
     should_send_daily_report = (last_report_date != today_str) or (len(previous_state) == 0)
 
-    for category_name, page_url in PAGES_TO_MONITOR.items():
-        items = fetch_page_items(page_url)
+    current_state = {}
+
+    for category_name, items in scraped_data.items():
         current_state[category_name] = items
         
         prev_items = set(previous_state.get(category_name, []))
         curr_items = set(items)
-        
         new_items = curr_items - prev_items
-        
-        # 1. حالة التقرير الشامل (أول تشغيل أو تقرير يومي)
+
         if should_send_daily_report:
             if items:
-                formatted_list = "\n".join([f"• {item}" for item in items[:6]])
-                msg = f"<b>[التقرير اليومي - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\n{formatted_list}"
+                formatted_list = "\n".join([f"• {item}" for item in items[:8]])
+                msg = f"<b>[التقرير الشامل - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\n{formatted_list}"
             else:
-                msg = f"<b>[التقرير اليومي - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\nلا توجد عناصر مسجلة حالياً."
+                msg = f"<b>[التقرير الشامل - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\nلا توجد عناصر مسجلة حالياً."
             
             send_telegram_msg(msg)
             send_email_msg(category_name, msg)
             
-        # 2. حالة وجود تحديثات جديدة بين التقارير اليومية
         elif new_items:
             for new_item in new_items:
                 msg = f"🚨 <b>[تحديث جديد عاجل]</b>\n\n<b>القسم:</b> {category_name}\n\n<b>التفاصيل:</b>\n{new_item}"
                 send_telegram_msg(msg)
                 send_email_msg(category_name, msg)
 
-    # حفظ تاريخ اليوم لمنع تكرار التقرير اليومي في الفحص التالي لنفس اليوم
     current_state['_last_report_date'] = today_str
     save_state(current_state)
 

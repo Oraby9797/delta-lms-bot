@@ -9,7 +9,7 @@ from email.mime.multipart import MIMEMultipart
 from email.utils import formatdate, make_msgid
 from playwright.sync_api import sync_playwright
 
-# =========================================
+# ==========================================
 # 1. إعدادات التليجرام والجيميل
 # ==========================================
 BOT_TOKEN = '8530974763:AAFNe--rkf-ocpitUqSV2z4tTWdoln_GgII'
@@ -23,12 +23,11 @@ def send_telegram_msg(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         'chat_id': CHAT_ID,
-        'text': text,
-        'parse_mode': 'HTML'
+        'text': text
     }
     try:
-        requests.post(url, data=payload)
-        print("تم إرسال التنبيه للتليجرام بنجاح!")
+        res = requests.post(url, data=payload)
+        print(f"نتيجة إرسال التليجرام: {res.status_code}")
     except Exception as e:
         print(f"خطأ تليجرام: {e}")
 
@@ -89,7 +88,6 @@ def scrape_lms_with_browser():
         context = browser.new_context()
         page = context.new_page()
 
-        # 1. تسجيل الدخول التفاعلي
         print("🔑 جاري تسجيل الدخول تفاعلياً لـ LMS جامعة الدلتا...")
         page.goto("https://dulms.deltauniv.edu.eg/login.aspx", wait_until="networkidle")
         
@@ -99,7 +97,6 @@ def scrape_lms_with_browser():
         
         page.wait_for_load_state("networkidle")
 
-        # 2. التنقل داخل الأقسام وسحب البيانات التفصيلية
         for category_name, url in PAGES_TO_MONITOR.items():
             print(f"🌐 فحص قسم: {category_name}")
             try:
@@ -113,15 +110,17 @@ def scrape_lms_with_browser():
                     text = row.inner_text().strip()
                     text = re.sub(r'\t+', ' | ', text)
                     text = re.sub(r'\n+', ' | ', text)
-                    if len(text) > 8 and text not in extracted_items:
+                    if len(text) > 5 and text not in extracted_items:
                         extracted_items.append(text)
 
-                cards = page.query_selector_all("div.card, div.item, .quiz-item, .assignment-item, .notification-item")
+                cards = page.query_selector_all("div, li, article")
                 for card in cards:
                     text = card.inner_text().strip()
                     text = re.sub(r'\s+', ' ', text)
-                    if len(text) > 8 and text not in extracted_items:
-                        extracted_items.append(text)
+                    if len(text) > 10 and text not in extracted_items and "Logout" not in text:
+                        # إضافة نصوص الكروت المفيدة فقط
+                        if any(k in text.lower() for k in ['quiz', 'assignment', 'absence', 'grade', 'lecture', 'section', 'واجب', 'غياب', 'كويز', 'درجات']):
+                            extracted_items.append(text)
 
                 scraped_data[category_name] = extracted_items
             except Exception as e:
@@ -132,14 +131,17 @@ def scrape_lms_with_browser():
     return scraped_data
 
 # ==========================================
-# 3. المقارنة وإرسال التقارير المنظمة
+# 3. الفحص والتقرير المنظم المباشر
 # ==========================================
 STATE_FILE = 'lms_state.json'
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {}
     return {}
 
 def save_state(state):
@@ -149,37 +151,23 @@ def save_state(state):
 def run_monitor():
     previous_state = load_state()
     scraped_data = scrape_lms_with_browser()
-    
-    today_str = datetime.now().strftime('%Y-%m-%d')
-    last_report_date = previous_state.get('_last_report_date', '')
-    should_send_daily_report = (last_report_date != today_str) or (len(previous_state) == 0)
-
     current_state = {}
 
     for category_name, items in scraped_data.items():
         current_state[category_name] = items
         
-        prev_items = set(previous_state.get(category_name, []))
-        curr_items = set(items)
-        new_items = curr_items - prev_items
+        # إرسال تقرير لكل قسم بشكل منفصل
+        if items:
+            # تنظيف وقص النص ليكون مناسباً لرسالة التليجرام
+            clean_items = [f"• {item[:200]}" for item in items[:8]]
+            formatted_list = "\n\n".join(clean_items)
+            msg = f"📊 [تقرير {category_name}]\n\n{formatted_list}"
+        else:
+            msg = f"📊 [تقرير {category_name}]\n\nلا توجد عناصر جديدة أو مواعيد مسجلة حالياً."
+        
+        send_telegram_msg(msg)
+        send_email_msg(category_name, msg)
 
-        if should_send_daily_report:
-            if items:
-                formatted_list = "\n".join([f"• {item}" for item in items[:8]])
-                msg = f"<b>[التقرير الشامل - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\n{formatted_list}"
-            else:
-                msg = f"<b>[التقرير الشامل - LMS جامعة الدلتا]</b>\n\n<b>{category_name}</b>\n\nلا توجد عناصر مسجلة حالياً."
-            
-            send_telegram_msg(msg)
-            send_email_msg(category_name, msg)
-            
-        elif new_items:
-            for new_item in new_items:
-                msg = f"🚨 <b>[تحديث جديد عاجل]</b>\n\n<b>القسم:</b> {category_name}\n\n<b>التفاصيل:</b>\n{new_item}"
-                send_telegram_msg(msg)
-                send_email_msg(category_name, msg)
-
-    current_state['_last_report_date'] = today_str
     save_state(current_state)
 
 if __name__ == '__main__':
